@@ -6,6 +6,7 @@ import { Provider } from "react-redux";
 import actions from "./actions/dtale";
 import "./adapter-for-react-16";
 import { DataViewer } from "./dtale/DataViewer";
+import { CodeExport } from "./popups/CodeExport";
 import { ReactCorrelations as Correlations } from "./popups/Correlations";
 import { ReactDescribe as Describe } from "./popups/Describe";
 import { ReactHistogram as Histogram } from "./popups/Histogram";
@@ -40,6 +41,9 @@ if (_.startsWith(window.location.pathname, "/dtale/popup")) {
       break;
     case "instances":
       rootNode = <Instances dataId={dataId} iframe={true} />;
+      break;
+    case "code":
+      rootNode = <CodeExport dataId={dataId} />;
       break;
     case "charts":
     default:

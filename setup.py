@@ -66,7 +66,7 @@ setup(
         "Flask-Compress",
         "Flask",
         "flask-ngrok; python_version > '3.0'",
-        "future",
+        "future >= 0.14.0",
         "itsdangerous",
         "pandas",
         "requests",

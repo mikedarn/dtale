@@ -17,6 +17,7 @@ import dtale.global_state as global_state
 from dtale import dtale
 from dtale.charts.utils import build_chart
 from dtale.cli.clickutils import retrieve_meta_info_and_version
+from dtale.column_builders import ColumnBuilder
 from dtale.utils import (DuplicateDataError, build_shutdown_url, classify_type,
                          dict_merge, filter_df_for_grid, find_dtype,
                          find_dtype_formatter, find_selected_column,
@@ -748,53 +749,8 @@ def build_column(data_id):
         col_type = get_str_arg(request, 'type')
         cfg = json.loads(get_str_arg(request, 'cfg'))
 
-        def _build_numeric(cfg):
-            left, right, operation = (cfg.get(p) for p in ['left', 'right', 'operation'])
-            left = data[left['col']] if 'col' in left else float(left['val'])
-            right = data[right['col']] if 'col' in right else float(right['val'])
-            if operation == 'sum':
-                return left + right
-            if operation == 'difference':
-                return left - right
-            if operation == 'multiply':
-                return left * right
-            if operation == 'divide':
-                return left / right
-            return np.nan
-
-        def _build_datetime(cfg):
-            col = cfg['col']
-            if 'property' in cfg:
-                return getattr(data[col].dt, cfg['property'])
-            conversion_key = cfg['conversion']
-            [freq, how] = conversion_key.split('_')
-            freq = dict(month='M', quarter='Q', year='Y')[freq]
-            conversion_data = data[[col]].set_index(col).index.to_period(freq).to_timestamp(how=how).normalize()
-            return pd.Series(conversion_data, index=data.index, name=name)
-
-        def _build_bins(cfg):
-            col, operation, bins, labels = (cfg.get(p) for p in ['col', 'operation', 'bins', 'labels'])
-            bins = int(bins)
-            if operation == 'cut':
-                bin_data = pd.cut(data[col], bins=bins)
-            else:
-                bin_data = pd.qcut(data[col], q=bins)
-            if labels:
-                cats = {idx: str(cat) for idx, cat in enumerate(labels.split(','))}
-            else:
-                cats = {idx: str(cat) for idx, cat in enumerate(bin_data.cat.categories)}
-            bin_data = pd.Series(bin_data.cat.codes.map(cats))
-            return bin_data
-
-        output = np.nan
-        if col_type == 'numeric':
-            output = _build_numeric(cfg)
-        elif col_type == 'datetime':
-            output = _build_datetime(cfg)
-        elif col_type == 'bins':
-            output = _build_bins(cfg)
-
-        data.loc[:, name] = output
+        builder = ColumnBuilder(data_id, col_type, name, cfg)
+        data.loc[:, name] = builder.build_column()
         dtype = find_dtype(data[name])
         data_ranges = {}
         if classify_type(dtype) == 'F' and not data[name].isnull().all():
@@ -804,6 +760,9 @@ def build_column(data_id):
         curr_dtypes = global_state.get_dtypes(data_id)
         curr_dtypes.append(dtype_f(len(curr_dtypes), name))
         global_state.set_dtypes(curr_dtypes)
+        curr_history = global_state.get_history(data_id)
+        curr_history += [builder.build_code()]
+        global_state.set_history(data_id, curr_history)
         return jsonify(success=True)
     except BaseException as e:
         return jsonify(dict(error=str(e), traceback=str(traceback.format_exc())))
@@ -1299,5 +1258,35 @@ def get_context_variables(data_id):
         ctxt_vars = global_state.get_context_variables(data_id)
         return jsonify(context_variables={k: value_as_str(v) for k, v in ctxt_vars.items()},
                        success=True)
+    except BaseException as e:
+        return jsonify(error=str(e), traceback=str(traceback.format_exc()))
+
+
+@dtale.route('/code-export/<data_id>')
+def get_code_export(data_id):
+    try:
+        history = global_state.get_history(data_id) or []
+        settings = global_state.get_settings(data_id) or {}
+        startup_str = (
+            "# DISCLAIMER: 'df' refers to the data you passed in when calling 'dtale.show'\n\n"
+            'import pandas as pd\n\n'
+            'if isinstance(df, (pd.DatetimeIndex, pd.MultiIndex)):\n'
+            '\tdf = df.to_frame(index=False)\n\n'
+            '# remove any pre-existing indices for ease of use in the D-Tale code, but this is not required\n'
+            "df = df.reset_index().drop('index', axis=1, errors='ignore')\n"
+            'df.columns = [str(c) for c in df.columns]  # update columns to strings in case they are numbers\n'
+        )
+        final_history = [startup_str] + history
+        if 'query' in settings:
+            final_history.append("df = df.query('{}')\n".format(settings['query']))
+        if 'sort' in settings:
+            cols, dirs = [], []
+            for col, dir in settings['sort']:
+                cols.append(col)
+                dirs.append('True' if dir == 'ASC' else 'False')
+            final_history.append("df = df.sort_values(['{cols}'], ascending=[{dirs}])\n".format(
+                cols=', '.join(cols), dirs="', '".join(dirs)
+            ))
+        return jsonify(code='\n'.join(final_history), success=True)
     except BaseException as e:
         return jsonify(error=str(e), traceback=str(traceback.format_exc()))
