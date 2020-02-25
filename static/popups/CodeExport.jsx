@@ -1,7 +1,7 @@
-import _ from "lodash";
 import PropTypes from "prop-types";
 import React from "react";
 
+import { canCopy, CopyToClipboard } from "../CopyToClipboard";
 import { RemovableError } from "../RemovableError";
 import { buildURL } from "../actions/url-utils";
 import { fetchJson } from "../fetcher";
@@ -28,24 +28,16 @@ class CodeExport extends React.Component {
   }
 
   renderCopyToClipboard() {
-    if (document.queryCommandSupported && document.queryCommandSupported("copy")) {
-      const copy = e => {
-        this.textArea.select();
-        document.execCommand("copy");
-        e.target.focus();
-      };
+    if (canCopy()) {
+      const buttonBuilder = props => (
+        <button className="btn btn-primary" {...props}>
+          <i className="far fa-copy pr-3" />
+          <span>Copy</span>
+        </button>
+      );
       return (
         <div key="footer" className="modal-footer">
-          <textarea
-            ref={r => (this.textArea = r)}
-            style={{ position: "absolute", left: "-100%" }}
-            value={this.state.code || ""}
-            onChange={_.noop}
-          />
-          <button className="btn btn-primary" onClick={copy}>
-            <i className="far fa-copy pr-3" />
-            <span>Copy</span>
-          </button>
+          <CopyToClipboard key={1} text={this.state.code} buttonBuilder={buttonBuilder} />
         </div>
       );
     }

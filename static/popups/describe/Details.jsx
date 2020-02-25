@@ -2,6 +2,7 @@ import _ from "lodash";
 import PropTypes from "prop-types";
 import React from "react";
 
+import { renderCopyToClipboardAnchor } from "../../CopyToClipboard";
 import { RemovableError } from "../../RemovableError";
 import chartUtils from "../../chartUtils";
 import { fetchJson } from "../../fetcher";
@@ -31,6 +32,7 @@ class Details extends React.Component {
       const newState = {
         error: null,
         details: null,
+        code: null,
       };
       if (detailData.error) {
         newState.error = (
@@ -43,6 +45,7 @@ class Details extends React.Component {
       }
       newState.details = _.pick(detailData, ["describe", "uniques"]);
       newState.details.name = this.props.selected;
+      newState.code = detailData.code;
       this.setState(newState, this.createBoxplot);
     });
   }
@@ -129,9 +132,10 @@ class Details extends React.Component {
 
     return [
       <div key={1} className="row">
-        <div className="col-sm-12">
+        <div className="col-auto">
           <h1>{details.name}</h1>
         </div>
+        <div className="col text-right">{renderCopyToClipboardAnchor(this.state.code)}</div>
       </div>,
       <div key={2} className="row">
         <div className="col-md-6">

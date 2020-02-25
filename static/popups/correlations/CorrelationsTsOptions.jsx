@@ -2,6 +2,8 @@ import _ from "lodash";
 import PropTypes from "prop-types";
 import React from "react";
 
+import { renderCopyToClipboardAnchor } from "../../CopyToClipboard";
+
 class CorrelationsTsOptions extends React.Component {
   constructor(props) {
     super(props);
@@ -101,6 +103,7 @@ class CorrelationsTsOptions extends React.Component {
             {this.props.rolling && this.renderRollingWindow()}
           </div>
         </div>
+        <div className="col text-right">{renderCopyToClipboardAnchor(this.props.tsCode)}</div>
       </div>
     );
   }
@@ -114,6 +117,7 @@ CorrelationsTsOptions.propTypes = {
   selectedDate: PropTypes.string,
   window: PropTypes.number,
   buildTs: PropTypes.func,
+  tsCode: PropTypes.string,
 };
 
 export default CorrelationsTsOptions;

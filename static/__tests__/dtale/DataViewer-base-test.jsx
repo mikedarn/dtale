@@ -123,6 +123,7 @@ describe("DataViewer tests", () => {
           "Resize",
           "Heat Map",
           "Instances 1",
+          "Code Export",
           "About",
           "Shutdown",
         ]),

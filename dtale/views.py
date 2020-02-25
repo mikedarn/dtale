@@ -822,13 +822,20 @@ def load_describe(column_series, additional_aggs=None):
     :return: JSON serializable dictionary of the output from calling :meth:`pandas:pandas.Series.describe`
     """
     desc = column_series.describe().to_frame().T
+    code = ["# main statistics", "stats = df['{col}'].describe().to_frame().T".format(col=column_series.name)]
     if additional_aggs:
         for agg in additional_aggs:
             if agg == 'mode':
                 mode = column_series.mode().values
                 desc['mode'] = np.nan if len(mode) > 1 else mode[0]
+                code.append((
+                    "# mode\n"
+                    "mode = df['{col}'].mode().values\n"
+                    "stats['mode'] = np.nan if len(mode) > 1 else mode[0]"
+                ).format(col=column_series.name))
                 continue
             desc[agg] = getattr(column_series, agg)()
+            code.append("# {agg}\nstats['{agg}'] = df['{col}'].{agg}()".format(col=column_series.name, agg=agg))
     desc_f_overrides = {
         'I': lambda f, i, c: f.add_int(i, c, as_string=True),
         'F': lambda f, i, c: f.add_float(i, c, precision=4, as_string=True),
@@ -838,7 +845,7 @@ def load_describe(column_series, additional_aggs=None):
     if 'count' in desc:
         # pandas always returns 'count' as a float and it adds useless decimal points
         desc['count'] = desc['count'].split('.')[0]
-    return desc
+    return desc, code
 
 
 @dtale.route('/describe/<data_id>/<column>')
@@ -865,13 +872,16 @@ def describe(data_id, column):
         dtype = next((dtype_info['dtype'] for dtype_info in curr_dtypes if dtype_info['name'] == column), None)
         if classify_type(dtype) in ['I', 'F']:
             additional_aggs = ['sum', 'median', 'mode', 'var', 'sem', 'skew', 'kurt']
-        desc = load_describe(data[column], additional_aggs=additional_aggs)
+        code = build_code_export(data_id)
+        desc, desc_code = load_describe(data[column], additional_aggs=additional_aggs)
+        code += desc_code
         return_data = dict(describe=desc, success=True)
         uniq_vals = data[column].unique()
         if 'unique' not in return_data['describe']:
             return_data['describe']['unique'] = json_int(len(uniq_vals), as_string=True)
         uniq_f = find_dtype_formatter(get_dtypes(data)[column])
         if len(uniq_vals) <= 100:
+            code.append("uniq_vals = data['{}'].unique()".format(column))
             return_data['uniques'] = dict(
                 data=[uniq_f(u) for u in uniq_vals],
                 top=False
@@ -882,7 +892,9 @@ def describe(data_id, column):
                 data=[uniq_f(u) for u in uniq_vals],
                 top=True
             )
-
+            uniq_code = "uniq_vals = data['{}'].value_counts().sort_values(ascending=False).head(100).index.values"
+            code.append(uniq_code.format(column))
+        return_data['code'] = '\n'.join(code)
         return jsonify(return_data)
     except BaseException as e:
         return jsonify(dict(error=str(e), traceback=str(traceback.format_exc())))
@@ -977,9 +989,9 @@ def get_histogram(data_id):
     :param bins: the number of bins to display in your histogram, options on the front-end are 5, 10, 20, 50
     :returns: JSON {results: DATA, desc: output from pd.DataFrame[col].describe(), success: True/False}
     """
-    col = get_str_arg(request, 'col', 'values')
-    bins = get_int_arg(request, 'bins', 20)
     try:
+        col = get_str_arg(request, 'col', 'values')
+        bins = get_int_arg(request, 'bins', 20)
         data = run_query(
             global_state.get_data(data_id),
             get_str_arg(request, 'query'),
@@ -989,8 +1001,13 @@ def get_histogram(data_id):
         data = data[~pd.isnull(data[selected_col])][[selected_col]]
         hist = np.histogram(data, bins=bins)
 
-        desc = load_describe(data[selected_col])
-        return jsonify(data=[json_float(h) for h in hist[0]], labels=['{0:.1f}'.format(l) for l in hist[1]], desc=desc)
+        desc, desc_code = load_describe(data[selected_col])
+        code = build_code_export(data_id, imports='import numpy as np\nimport pandas as pd\n\n')
+        code.append("hist = np.histogram(df[~pd.isnull(df['{col}'])][['{col}']], bins={bins})".format(
+            col=selected_col, bins=bins))
+        code += desc_code
+        return jsonify(data=[json_float(h) for h in hist[0]], labels=['{0:.1f}'.format(l) for l in hist[1]],
+                       desc=desc, code='\n'.join(code))
     except BaseException as e:
         return jsonify(dict(error=str(e), traceback=str(traceback.format_exc())))
 
@@ -1037,17 +1054,26 @@ def get_correlations(data_id):
 
         if data[valid_corr_cols].isnull().values.any():
             data = data.corr(method='pearson')
+            code = build_code_export(data_id)
+            code.append("corr_data = corr_data.corr(method='pearson')")
         else:
             # using pandas.corr proved to be quite slow on large datasets so I moved to numpy:
             # https://stackoverflow.com/questions/48270953/pandas-corr-and-corrwith-very-slow
             data = np.corrcoef(data[valid_corr_cols].values, rowvar=False)
             data = pd.DataFrame(data, columns=valid_corr_cols, index=valid_corr_cols)
+            code = build_code_export(data_id, imports='import numpy as np\nimport pandas as pd\n\n')
+            code.append((
+                "corr_data = np.corrcoef(df['{corr_cols}'].values, rowvar=False)"
+                "corr_data = pd.DataFrame(corr_data, columns=['{corr_cols}'], index=['{corr_cols}'])"
+            ).format(corr_cols="', '".join(valid_corr_cols)))
 
+        code.append("corr_data.index.name = str('column')\ncorr_data = corr_data.reset_index()")
+        code = '\n'.join(code)
         data.index.name = str('column')
         data = data.reset_index()
         col_types = grid_columns(data)
         f = grid_formatter(col_types, nan_display=None)
-        return jsonify(data=f.format_dicts(data.itertuples()), dates=valid_date_cols, rolling=rolling)
+        return jsonify(data=f.format_dicts(data.itertuples()), dates=valid_date_cols, rolling=rolling, code=code)
     except BaseException as e:
         return jsonify(dict(error=str(e), traceback=str(traceback.format_exc())))
 
@@ -1120,22 +1146,38 @@ def get_correlations_ts(data_id):
         )
         cols = get_str_arg(request, 'cols')
         cols = json.loads(cols)
+        cols = list(set(cols))
+        [col1, col2] = cols
         date_col = get_str_arg(request, 'dateCol')
         rolling_window = get_int_arg(request, 'rollingWindow')
+        code = build_code_export(data_id)
+
         if rolling_window:
-            [col1, col2] = list(set(cols))
             data = data[[date_col, col1, col2]].set_index(date_col)
             data = data[[col1, col2]].rolling(rolling_window).corr().reset_index()
             data = data.dropna()
             data = data[data['level_1'] == col1][[date_col, col2]]
+            code.append((
+                "corr_ts = df[['{date_col}', '{col1}', '{col2}']].set_index('{date_col}')\n"
+                "corr_ts = corr_ts[['{col1}', '{col2}']].rolling({rolling_window}).corr().reset_index()\n"
+                "corr_ts = corr_ts.dropna()\n"
+                "corr_ts = corr_ts[corr_ts['level_1'] == '{col1}'][['{date_col}', '{col2}']]"
+            ).format(col1=col1, col2=col2, date_col=date_col))
         else:
-            data = data.groupby(date_col)[list(set(cols))].corr(method='pearson')
+            data = data.groupby(date_col)[cols].corr(method='pearson')
             data.index.names = ['date', 'column']
             data = data.reset_index()
-            data = data[data.column == cols[0]][['date', cols[1]]]
+            data = data[data.column == col1][['date', col2]]
+            code.append((
+                "corr_ts = df.groupby('{date_col}')['{cols}'].corr(method='pearson')\n"
+                "corr_ts.index.names = ['date', 'column']\n"
+                "corr_ts = corr_ts[corr_ts.column == '{col1}'][['date', '{col2}']]\n"
+            ).format(col1=col1, col2=col2, date_col=date_col, cols="', '".join(cols)))
         data.columns = ['date', 'corr']
+        code.append("corr_ts.columns = ['date', 'corr']")
         return_data = build_chart(data.fillna(0), 'date', 'corr')
         return_data['success'] = True
+        return_data['code'] = '\n'.join(code)
         return jsonify(return_data)
     except BaseException as e:
         return jsonify(dict(error=str(e), traceback=str(traceback.format_exc())))
@@ -1166,11 +1208,12 @@ def get_scatter(data_id):
         y: col2
     } or {error: 'Exception message', traceback: 'Exception stacktrace'}
     """
-    cols = get_json_arg(request, 'cols')
-    date = get_str_arg(request, 'date')
-    date_col = get_str_arg(request, 'dateCol')
-    rolling = get_bool_arg(request, 'rolling')
     try:
+        cols = get_json_arg(request, 'cols')
+        date = get_str_arg(request, 'date')
+        date_col = get_str_arg(request, 'dateCol')
+        rolling = get_bool_arg(request, 'rolling')
+
         data = run_query(
             global_state.get_data(data_id),
             get_str_arg(request, 'query'),
@@ -1178,38 +1221,63 @@ def get_scatter(data_id):
         )
         idx_col = str('index')
         y_cols = [cols[1], idx_col]
+        code = build_code_export(data_id)
+
         if rolling:
             window = get_int_arg(request, 'window')
             idx = min(data[data[date_col] == date].index) + 1
             data = data.iloc[max(idx - window, 0):idx]
             data = data[list(set(cols)) + [date_col]].dropna(how='any')
             y_cols.append(date_col)
+            code.append((
+                "idx = min(df[df['{date_col}'] == '{date}'].index) + 1\n"
+                "scatter_data = scatter_data.iloc[max(idx - {window}, 0):idx]\n"
+                "scatter_data = scatter_data['{cols}'].dropna(how='any')"
+            ).format(date_col=date_col, date=date, window=window, cols="', '".join(list(set(cols)) + [date_col])))
         else:
             data = data[data[date_col] == date] if date else data
             data = data[list(set(cols))].dropna(how='any')
+            code.append(("scatter_data = df[df['{date_col}'] == '{date}']" if date else 'scatter_data = df').format(
+                date_col=date_col, date=date
+            ))
+            code.append("scatter_data = scatter_data['{cols}'].dropna(how='any')".format(
+                cols="', '".join(list(set(cols)))
+            ))
 
         data[idx_col] = data.index
-        s0 = data[cols[0]]
-        s1 = data[cols[1]]
+        [col1, col2] = cols
+        s0 = data[col1]
+        s1 = data[col2]
         pearson = s0.corr(s1, method='pearson')
         spearman = s0.corr(s1, method='spearman')
         stats = dict(
             pearson='N/A' if pd.isnull(pearson) else pearson,
             spearman='N/A' if pd.isnull(spearman) else spearman,
             correlated=len(data),
-            only_in_s0=len(data[data[cols[0]].isnull()]),
-            only_in_s1=len(data[data[cols[1]].isnull()])
+            only_in_s0=len(data[data[col1].isnull()]),
+            only_in_s1=len(data[data[col2].isnull()])
         )
+        code.append((
+            "scatter_data['{idx_col}'] = scatter_data.index\n"
+            "s0 = scatter_data['{col1}']\n"
+            "s1 = scatter_data['{col2}']\n"
+            "pearson = s0.corr(s1, method='pearson')\n"
+            "spearman = s0.corr(s1, method='spearman')\n"
+            "only_in_s0 = len(scatter_data[scatter_data['{col1}'].isnull()])\n"
+            "only_in_s1 = len(scatter_data[scatter_data['{col2}'].isnull()])"
+        ).format(col1=col1, col2=col2, idx_col=idx_col))
 
         if len(data) > 15000:
             return jsonify(
                 stats=stats,
+                code='\n'.join(code),
                 error='Dataset exceeds 15,000 records, cannot render scatter. Please apply filter...'
             )
         data = build_chart(data, cols[0], y_cols, allow_duplicates=True)
         data['x'] = cols[0]
         data['y'] = cols[1]
         data['stats'] = stats
+        data['code'] = '\n'.join(code)
         return jsonify(data)
     except BaseException as e:
         return jsonify(dict(error=str(e), traceback=str(traceback.format_exc())))
@@ -1262,31 +1330,36 @@ def get_context_variables(data_id):
         return jsonify(error=str(e), traceback=str(traceback.format_exc()))
 
 
+def build_code_export(data_id, imports='import pandas as pd\n\n'):
+    history = global_state.get_history(data_id) or []
+    settings = global_state.get_settings(data_id) or {}
+    startup_str = (
+        "# DISCLAIMER: 'df' refers to the data you passed in when calling 'dtale.show'\n\n"
+        '{imports}'
+        'if isinstance(df, (pd.DatetimeIndex, pd.MultiIndex)):\n'
+        '\tdf = df.to_frame(index=False)\n\n'
+        '# remove any pre-existing indices for ease of use in the D-Tale code, but this is not required\n'
+        "df = df.reset_index().drop('index', axis=1, errors='ignore')\n"
+        'df.columns = [str(c) for c in df.columns]  # update columns to strings in case they are numbers\n'
+    ).format(imports=imports)
+    final_history = [startup_str] + history
+    if 'query' in settings:
+        final_history.append("df = df.query('{}')\n".format(settings['query']))
+    if 'sort' in settings:
+        cols, dirs = [], []
+        for col, dir in settings['sort']:
+            cols.append(col)
+            dirs.append('True' if dir == 'ASC' else 'False')
+        final_history.append("df = df.sort_values(['{cols}'], ascending=[{dirs}])\n".format(
+            cols=', '.join(cols), dirs="', '".join(dirs)
+        ))
+    return final_history
+
+
 @dtale.route('/code-export/<data_id>')
 def get_code_export(data_id):
     try:
-        history = global_state.get_history(data_id) or []
-        settings = global_state.get_settings(data_id) or {}
-        startup_str = (
-            "# DISCLAIMER: 'df' refers to the data you passed in when calling 'dtale.show'\n\n"
-            'import pandas as pd\n\n'
-            'if isinstance(df, (pd.DatetimeIndex, pd.MultiIndex)):\n'
-            '\tdf = df.to_frame(index=False)\n\n'
-            '# remove any pre-existing indices for ease of use in the D-Tale code, but this is not required\n'
-            "df = df.reset_index().drop('index', axis=1, errors='ignore')\n"
-            'df.columns = [str(c) for c in df.columns]  # update columns to strings in case they are numbers\n'
-        )
-        final_history = [startup_str] + history
-        if 'query' in settings:
-            final_history.append("df = df.query('{}')\n".format(settings['query']))
-        if 'sort' in settings:
-            cols, dirs = [], []
-            for col, dir in settings['sort']:
-                cols.append(col)
-                dirs.append('True' if dir == 'ASC' else 'False')
-            final_history.append("df = df.sort_values(['{cols}'], ascending=[{dirs}])\n".format(
-                cols=', '.join(cols), dirs="', '".join(dirs)
-            ))
-        return jsonify(code='\n'.join(final_history), success=True)
+        code = build_code_export(data_id)
+        return jsonify(code='\n'.join(code), success=True)
     except BaseException as e:
         return jsonify(error=str(e), traceback=str(traceback.format_exc()))

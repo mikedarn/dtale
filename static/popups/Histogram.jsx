@@ -6,6 +6,7 @@ import PropTypes from "prop-types";
 import React from "react";
 import { connect } from "react-redux";
 
+import { renderCopyToClipboardAnchor } from "../CopyToClipboard";
 import { RemovableError } from "../RemovableError";
 import actions from "../actions/dtale";
 import { buildURLParams } from "../actions/url-utils";
@@ -106,6 +107,7 @@ class ReactHistogram extends React.Component {
             onKeyPress={updateBins}
           />
         </div>
+        <div className="col text-right">{renderCopyToClipboardAnchor(this.state.code)}</div>
       </div>
     );
   }
@@ -128,6 +130,7 @@ class ReactHistogram extends React.Component {
         return createHistogram(ctx, fetchedChartData, selectedCol);
       };
       newState.chart = chartUtils.chartWrapper("universeHistogram", this.state.chart, builder);
+      newState.code = _.get(fetchedChartData, "code", "");
       this.setState(newState);
     });
   }

@@ -10104,6 +10104,10 @@ select.form-control:focus,
   position: relative;
   border-bottom: dashed 1px #004c93;
 }
+.hoverable-click {
+  display: inline;
+  position: relative;
+}
 
 .hoverable:visited {
   color: #044c8f;
@@ -10126,7 +10130,8 @@ select.form-control:focus,
   display: block;
 }
 
-.hoverable .hoverable__content {
+.hoverable .hoverable__content,
+.hoverable-click .hoverable__content{
   display: none;
 }
 
@@ -10140,6 +10145,11 @@ select.form-control:focus,
   width: 20em;
   text-align: left;
   color: #404040;
+}
+.hoverable__content.copy-tt {
+  padding: .5em .5em;
+  width: 10em;
+  text-align: center;
 }
 
 div.hoverable.label {
