@@ -2,7 +2,7 @@ import _ from "lodash";
 import PropTypes from "prop-types";
 import React from "react";
 
-import { renderCopyToClipboardAnchor } from "../../CopyToClipboard";
+import { renderCodePopupAnchor } from "../CodePopup";
 
 class CorrelationsTsOptions extends React.Component {
   constructor(props) {
@@ -103,7 +103,7 @@ class CorrelationsTsOptions extends React.Component {
             {this.props.rolling && this.renderRollingWindow()}
           </div>
         </div>
-        <div className="col text-right">{renderCopyToClipboardAnchor(this.props.tsCode)}</div>
+        <div className="col text-right">{renderCodePopupAnchor(this.props.tsCode, "Correlations Timeseries")}</div>
       </div>
     );
   }

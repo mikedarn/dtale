@@ -3,23 +3,8 @@ import _ from "lodash";
 import PropTypes from "prop-types";
 import React from "react";
 
-import { JSAnchor } from "./JSAnchor";
-
 function canCopy() {
   return document.queryCommandSupported && document.queryCommandSupported("copy");
-}
-
-function renderCopyToClipboardAnchor(text, key = 0) {
-  if (canCopy()) {
-    const buttonBuilder = props => (
-      <JSAnchor {...props}>
-        <i className="far fa-copy pr-3" />
-        <span>Copy Code</span>
-      </JSAnchor>
-    );
-    return <CopyToClipboard key={key} text={text || ""} buttonBuilder={buttonBuilder} />;
-  }
-  return null;
 }
 
 class CopyToClipboard extends React.Component {
@@ -33,7 +18,10 @@ class CopyToClipboard extends React.Component {
         this.textArea.select();
         document.execCommand("copy");
         e.target.focus();
-        $(e.target).parent().parent().find("div.copy-tt")
+        $(e.target)
+          .parent()
+          .parent()
+          .find(`div.copy-tt-${this.props.tooltipPosition}`)
           .fadeIn(300)
           .delay(300)
           .fadeOut(400);
@@ -48,7 +36,7 @@ class CopyToClipboard extends React.Component {
         />,
         <div key="copy-btn" className="hoverable-click">
           {this.props.buttonBuilder({ onClick: copy })}
-          <div className="hoverable__content copy-tt">{"Copied to clipboard"}</div>
+          <div className={`hoverable__content copy-tt-${this.props.tooltipPosition}`}>{"Copied to clipboard"}</div>
         </div>,
       ];
     }
@@ -59,6 +47,8 @@ CopyToClipboard.displayName = "CopyToClipboard";
 CopyToClipboard.propTypes = {
   text: PropTypes.string,
   buttonBuilder: PropTypes.func,
+  tooltipPosition: PropTypes.string,
 };
+CopyToClipboard.defaultProps = { tooltipPosition: "bottom" };
 
-export { CopyToClipboard, canCopy, renderCopyToClipboardAnchor };
+export { CopyToClipboard, canCopy };

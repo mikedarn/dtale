@@ -2,10 +2,10 @@ import _ from "lodash";
 import PropTypes from "prop-types";
 import React from "react";
 
-import { renderCopyToClipboardAnchor } from "../../CopyToClipboard";
 import { RemovableError } from "../../RemovableError";
 import chartUtils from "../../chartUtils";
 import { fetchJson } from "../../fetcher";
+import { renderCodePopupAnchor } from "../CodePopup";
 
 const BASE_DESCRIBE_URL = "/dtale/describe";
 
@@ -135,7 +135,7 @@ class Details extends React.Component {
         <div className="col-auto">
           <h1>{details.name}</h1>
         </div>
-        <div className="col text-right">{renderCopyToClipboardAnchor(this.state.code)}</div>
+        <div className="col text-right">{renderCodePopupAnchor(this.state.code, "Describe")}</div>
       </div>,
       <div key={2} className="row">
         <div className="col-md-6">

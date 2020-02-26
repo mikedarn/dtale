@@ -105,7 +105,7 @@ class ReactPopup extends React.Component {
         modalTitle = (
           <ModalTitle>
             <i className="ico-code" />
-            <strong>Code Snippet</strong>
+            <strong>Code Export</strong>
           </ModalTitle>
         );
         body = <CodeExport {...this.props} />;

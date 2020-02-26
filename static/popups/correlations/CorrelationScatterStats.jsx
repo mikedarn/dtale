@@ -3,7 +3,7 @@ import moment from "moment";
 import PropTypes from "prop-types";
 import React from "react";
 
-import { renderCopyToClipboardAnchor } from "../../CopyToClipboard";
+import { renderCodePopupAnchor } from "../CodePopup";
 import corrUtils from "./correlationsUtils";
 
 class CorrelationScatterStats extends React.Component {
@@ -53,7 +53,9 @@ class CorrelationScatterStats extends React.Component {
           <dt>{`Only in ${col1}`}</dt>
           <dd>{stats.only_in_s1}</dd>
         </dl>
-        <dl className="property-pair inline float-right">{renderCopyToClipboardAnchor(this.props.scatterCode)}</dl>
+        <dl className="property-pair inline float-right">
+          {renderCodePopupAnchor(this.props.scatterCode, "Correlations Scatter")}
+        </dl>
       </div>,
       <div key={1} style={{ marginTop: "-.5em" }}>
         <small>(Click on any point in the scatter to filter the grid down to that record)</small>

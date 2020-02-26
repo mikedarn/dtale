@@ -18,8 +18,9 @@ from dtale import dtale
 from dtale.charts.utils import build_chart
 from dtale.cli.clickutils import retrieve_meta_info_and_version
 from dtale.column_builders import ColumnBuilder
-from dtale.utils import (DuplicateDataError, build_shutdown_url, classify_type,
-                         dict_merge, filter_df_for_grid, find_dtype,
+from dtale.utils import (DuplicateDataError, build_code_export,
+                         build_shutdown_url, classify_type, dict_merge,
+                         divide_chunks, filter_df_for_grid, find_dtype,
                          find_dtype_formatter, find_selected_column,
                          get_bool_arg, get_dtypes, get_int_arg, get_json_arg,
                          get_str_arg, grid_columns, grid_formatter, json_date,
@@ -524,7 +525,7 @@ def view_iframe(data_id=None):
 @dtale.route('/popup/<popup_type>/<data_id>')
 def view_popup(popup_type, data_id=None):
     """
-    :class:`flask:flask.Flask` route which serves up base jinja template for any popup, additionally forwards any
+    :class:`flask:flask.Flask` route which serves up a base jinja template for any popup, additionally forwards any
     request parameters as input to template.
 
     :param popup_type: type of popup to be opened. Possible values: charts, correlations, describe, histogram, instances
@@ -546,6 +547,17 @@ def view_popup(popup_type, data_id=None):
             return ', '.join(['{}: {}'.format(k, str(v)) for k, v in obj.items()])
         title = '{} ({})'.format(title, pretty_print(params))
     return base_render_template('dtale/popup.html', data_id, title=title, js_prefix=popup_type)
+
+
+@dtale.route('/code-popup')
+def view_code_popup():
+    """
+    :class:`flask:flask.Flask` route which serves up a base jinja template for code snippets, additionally forwards any
+    request or form parameters as input to template.
+
+    :return: HTML
+    """
+    return render_template('dtale/code_popup.html')
 
 
 @dtale.route('/processes')
@@ -759,8 +771,8 @@ def build_column(data_id):
         global_state.set_data(data_id, data)
         curr_dtypes = global_state.get_dtypes(data_id)
         curr_dtypes.append(dtype_f(len(curr_dtypes), name))
-        global_state.set_dtypes(curr_dtypes)
-        curr_history = global_state.get_history(data_id)
+        global_state.set_dtypes(data_id, curr_dtypes)
+        curr_history = global_state.get_history(data_id) or []
         curr_history += [builder.build_code()]
         global_state.set_history(data_id, curr_history)
         return jsonify(success=True)
@@ -1063,9 +1075,12 @@ def get_correlations(data_id):
             data = pd.DataFrame(data, columns=valid_corr_cols, index=valid_corr_cols)
             code = build_code_export(data_id, imports='import numpy as np\nimport pandas as pd\n\n')
             code.append((
-                "corr_data = np.corrcoef(df['{corr_cols}'].values, rowvar=False)"
-                "corr_data = pd.DataFrame(corr_data, columns=['{corr_cols}'], index=['{corr_cols}'])"
-            ).format(corr_cols="', '".join(valid_corr_cols)))
+                "corr_cols = [\n"
+                "\t'{corr_cols}'\n"
+                "]\n"
+                "corr_data = np.corrcoef(df[corr_cols].values, rowvar=False)\n"
+                "corr_data = pd.DataFrame(corr_data, columns=[corr_cols], index=[corr_cols])"
+            ).format(corr_cols="'\n\t'".join(["', '".join(chunk) for chunk in divide_chunks(valid_corr_cols, 8)])))
 
         code.append("corr_data.index.name = str('column')\ncorr_data = corr_data.reset_index()")
         code = '\n'.join(code)
@@ -1116,7 +1131,7 @@ def get_chart_data(data_id):
         allow_duplicates = get_bool_arg(request, 'allowDupes')
         window = get_int_arg(request, 'rollingWin')
         comp = get_str_arg(request, 'rollingComp')
-        data = build_chart(data, x, y, group_col, agg, allow_duplicates, rolling_win=window, rolling_comp=comp)
+        data, code = build_chart(data, x, y, group_col, agg, allow_duplicates, rolling_win=window, rolling_comp=comp)
         data['success'] = True
         return jsonify(data)
     except BaseException as e:
@@ -1146,7 +1161,6 @@ def get_correlations_ts(data_id):
         )
         cols = get_str_arg(request, 'cols')
         cols = json.loads(cols)
-        cols = list(set(cols))
         [col1, col2] = cols
         date_col = get_str_arg(request, 'dateCol')
         rolling_window = get_int_arg(request, 'rollingWindow')
@@ -1162,7 +1176,7 @@ def get_correlations_ts(data_id):
                 "corr_ts = corr_ts[['{col1}', '{col2}']].rolling({rolling_window}).corr().reset_index()\n"
                 "corr_ts = corr_ts.dropna()\n"
                 "corr_ts = corr_ts[corr_ts['level_1'] == '{col1}'][['{date_col}', '{col2}']]"
-            ).format(col1=col1, col2=col2, date_col=date_col))
+            ).format(col1=col1, col2=col2, date_col=date_col, rolling_window=rolling_window))
         else:
             data = data.groupby(date_col)[cols].corr(method='pearson')
             data.index.names = ['date', 'column']
@@ -1175,7 +1189,7 @@ def get_correlations_ts(data_id):
             ).format(col1=col1, col2=col2, date_col=date_col, cols="', '".join(cols)))
         data.columns = ['date', 'corr']
         code.append("corr_ts.columns = ['date', 'corr']")
-        return_data = build_chart(data.fillna(0), 'date', 'corr')
+        return_data, _code = build_chart(data.fillna(0), 'date', 'corr')
         return_data['success'] = True
         return_data['code'] = '\n'.join(code)
         return jsonify(return_data)
@@ -1227,21 +1241,23 @@ def get_scatter(data_id):
             window = get_int_arg(request, 'window')
             idx = min(data[data[date_col] == date].index) + 1
             data = data.iloc[max(idx - window, 0):idx]
-            data = data[list(set(cols)) + [date_col]].dropna(how='any')
+            data = data[cols + [date_col]].dropna(how='any')
             y_cols.append(date_col)
             code.append((
                 "idx = min(df[df['{date_col}'] == '{date}'].index) + 1\n"
                 "scatter_data = scatter_data.iloc[max(idx - {window}, 0):idx]\n"
                 "scatter_data = scatter_data['{cols}'].dropna(how='any')"
-            ).format(date_col=date_col, date=date, window=window, cols="', '".join(list(set(cols)) + [date_col])))
+            ).format(
+                date_col=date_col, date=date, window=window, cols="', '".join(sorted(list(set(cols)) + [date_col])))
+            )
         else:
             data = data[data[date_col] == date] if date else data
-            data = data[list(set(cols))].dropna(how='any')
+            data = data[cols].dropna(how='any')
             code.append(("scatter_data = df[df['{date_col}'] == '{date}']" if date else 'scatter_data = df').format(
                 date_col=date_col, date=date
             ))
             code.append("scatter_data = scatter_data['{cols}'].dropna(how='any')".format(
-                cols="', '".join(list(set(cols)))
+                cols="', '".join(cols)
             ))
 
         data[idx_col] = data.index
@@ -1273,7 +1289,7 @@ def get_scatter(data_id):
                 code='\n'.join(code),
                 error='Dataset exceeds 15,000 records, cannot render scatter. Please apply filter...'
             )
-        data = build_chart(data, cols[0], y_cols, allow_duplicates=True)
+        data, _code = build_chart(data, cols[0], y_cols, allow_duplicates=True)
         data['x'] = cols[0]
         data['y'] = cols[1]
         data['stats'] = stats
@@ -1328,32 +1344,6 @@ def get_context_variables(data_id):
                        success=True)
     except BaseException as e:
         return jsonify(error=str(e), traceback=str(traceback.format_exc()))
-
-
-def build_code_export(data_id, imports='import pandas as pd\n\n'):
-    history = global_state.get_history(data_id) or []
-    settings = global_state.get_settings(data_id) or {}
-    startup_str = (
-        "# DISCLAIMER: 'df' refers to the data you passed in when calling 'dtale.show'\n\n"
-        '{imports}'
-        'if isinstance(df, (pd.DatetimeIndex, pd.MultiIndex)):\n'
-        '\tdf = df.to_frame(index=False)\n\n'
-        '# remove any pre-existing indices for ease of use in the D-Tale code, but this is not required\n'
-        "df = df.reset_index().drop('index', axis=1, errors='ignore')\n"
-        'df.columns = [str(c) for c in df.columns]  # update columns to strings in case they are numbers\n'
-    ).format(imports=imports)
-    final_history = [startup_str] + history
-    if 'query' in settings:
-        final_history.append("df = df.query('{}')\n".format(settings['query']))
-    if 'sort' in settings:
-        cols, dirs = [], []
-        for col, dir in settings['sort']:
-            cols.append(col)
-            dirs.append('True' if dir == 'ASC' else 'False')
-        final_history.append("df = df.sort_values(['{cols}'], ascending=[{dirs}])\n".format(
-            cols=', '.join(cols), dirs="', '".join(dirs)
-        ))
-    return final_history
 
 
 @dtale.route('/code-export/<data_id>')

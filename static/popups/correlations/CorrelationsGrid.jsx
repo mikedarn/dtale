@@ -8,8 +8,8 @@ import AutoSizer from "react-virtualized/dist/commonjs/AutoSizer";
 import MultiGrid from "react-virtualized/dist/commonjs/MultiGrid";
 
 import { BouncerWrapper } from "../../BouncerWrapper";
-import { renderCopyToClipboardAnchor } from "../../CopyToClipboard";
 import * as gu from "../../dtale/gridUtils";
+import { renderCodePopupAnchor } from "../CodePopup";
 import CorrelationsCell from "./CorrelationsCell";
 
 require("./CorrelationsGrid.css");
@@ -110,7 +110,7 @@ class CorrelationsGrid extends React.Component {
               <div className="col-auto">{this.renderSelect("col1", "col2")}</div>
               <span className="mb-auto mt-auto">vs.</span>
               <div className="col-auto">{this.renderSelect("col2", "col1")}</div>
-              <div className="col text-right">{renderCopyToClipboardAnchor(this.props.gridCode)}</div>
+              <div className="col text-right">{renderCodePopupAnchor(this.props.gridCode, "Correlations")}</div>
             </div>,
             <MultiGrid
               key={1}

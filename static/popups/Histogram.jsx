@@ -6,12 +6,12 @@ import PropTypes from "prop-types";
 import React from "react";
 import { connect } from "react-redux";
 
-import { renderCopyToClipboardAnchor } from "../CopyToClipboard";
 import { RemovableError } from "../RemovableError";
 import actions from "../actions/dtale";
 import { buildURLParams } from "../actions/url-utils";
 import chartUtils from "../chartUtils";
 import { fetchJson } from "../fetcher";
+import { renderCodePopupAnchor } from "./CodePopup";
 
 const BASE_HISTOGRAM_URL = "/dtale/histogram";
 const DESC_PROPS = ["count", "mean", "std", "min", "25%", "50%", "75%", "max"];
@@ -107,7 +107,7 @@ class ReactHistogram extends React.Component {
             onKeyPress={updateBins}
           />
         </div>
-        <div className="col text-right">{renderCopyToClipboardAnchor(this.state.code)}</div>
+        <div className="col text-right">{renderCodePopupAnchor(this.state.code, "Histogram")}</div>
       </div>
     );
   }

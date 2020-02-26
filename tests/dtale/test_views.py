@@ -423,7 +423,7 @@ def test_build_column_bins(unittest):
             )
             assert data[c.port]['cut'].values[0] is not None
             assert dtypes[c.port][-1]['name'] == 'cut'
-            assert dtypes[c.port][-1]['dtype'] == ('string' if PY3 else 'unicode')
+            assert dtypes[c.port][-1]['dtype'] == 'string'
 
             cfg = dict(col='a', operation='cut', bins=4, labels='foo,bar,biz,baz')
             c.get(
@@ -432,7 +432,7 @@ def test_build_column_bins(unittest):
             )
             assert data[c.port]['cut2'].values[0] in ['foo', 'bar', 'biz', 'baz']
             assert dtypes[c.port][-1]['name'] == 'cut2'
-            assert dtypes[c.port][-1]['dtype'] == ('string' if PY3 else 'unicode')
+            assert dtypes[c.port][-1]['dtype'] == 'string'
 
             cfg = dict(col='a', operation='qcut', bins=4)
             c.get(
@@ -441,7 +441,7 @@ def test_build_column_bins(unittest):
             )
             assert data[c.port]['qcut'].values[0] is not None
             assert dtypes[c.port][-1]['name'] == 'qcut'
-            assert dtypes[c.port][-1]['dtype'] == ('string' if PY3 else 'unicode')
+            assert dtypes[c.port][-1]['dtype'] == 'string'
 
             cfg = dict(col='a', operation='qcut', bins=4, labels='foo,bar,biz,baz')
             c.get(
@@ -450,7 +450,7 @@ def test_build_column_bins(unittest):
             )
             assert data[c.port]['qcut2'].values[0] in ['foo', 'bar', 'biz', 'baz']
             assert dtypes[c.port][-1]['name'] == 'qcut2'
-            assert dtypes[c.port][-1]['dtype'] == ('string' if PY3 else 'unicode')
+            assert dtypes[c.port][-1]['dtype'] == 'string'
 
 
 @pytest.mark.unit
@@ -609,6 +609,10 @@ def test_get_data(unittest, test_data):
             unittest.assertEqual(response_data['results'], expected, 'should return data at index 1 w/ sort')
             unittest.assertEqual(global_state.SETTINGS[c.port], {'query': 'security_id == 1'}, 'should update settings')
 
+            response = c.get('/dtale/code-export/{}'.format(c.port))
+            response_data = json.loads(response.data)
+            assert response_data['success']
+
     with app.test_client() as c:
         with ExitStack() as stack:
             stack.enter_context(mock.patch('dtale.global_state.DATA', {c.port: test_data}))
@@ -646,6 +650,23 @@ def test_get_data(unittest, test_data):
             )
 
 
+HISTOGRAM_CODE = '''# DISCLAIMER: 'df' refers to the data you passed in when calling 'dtale.show'
+
+import numpy as np
+import pandas as pd
+
+if isinstance(df, (pd.DatetimeIndex, pd.MultiIndex)):
+\tdf = df.to_frame(index=False)
+
+# remove any pre-existing indices for ease of use in the D-Tale code, but this is not required
+df = df.reset_index().drop('index', axis=1, errors='ignore')
+df.columns = [str(c) for c in df.columns]  # update columns to strings in case they are numbers
+
+hist = np.histogram(df[~pd.isnull(df['foo'])][['foo']], bins=20)
+# main statistics
+stats = df['foo'].describe().to_frame().T'''
+
+
 @pytest.mark.unit
 def test_get_histogram(unittest, test_data):
     with app.test_client() as c:
@@ -662,7 +683,12 @@ def test_get_histogram(unittest, test_data):
                     'count': '50', 'std': '0', 'min': '1', 'max': '1', '50%': '1', '25%': '1', '75%': '1', 'mean': '1'
                 }
             )
-            unittest.assertEqual(response_data, expected, 'should return 20-bin histogram for foo')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return 20-bin histogram for foo'
+            )
+            unittest.assertEqual(response_data['code'], HISTOGRAM_CODE)
 
             response = c.get('/dtale/histogram/{}'.format(c.port), query_string=dict(col='foo', bins=5))
             response_data = json.loads(response.data)
@@ -673,7 +699,11 @@ def test_get_histogram(unittest, test_data):
                     'count': '50', 'std': '0', 'min': '1', 'max': '1', '50%': '1', '25%': '1', '75%': '1', 'mean': '1'
                 }
             )
-            unittest.assertEqual(response_data, expected, 'should return 5-bin histogram for foo')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return 5-bin histogram for foo'
+            )
 
             response = c.get('/dtale/histogram/{}'.format(c.port),
                              query_string=dict(col='foo', bins=5, query='security_id > 10'))
@@ -685,7 +715,11 @@ def test_get_histogram(unittest, test_data):
                     'count': '39', 'std': '0', 'min': '1', 'max': '1', '50%': '1', '25%': '1', '75%': '1', 'mean': '1'
                 }
             )
-            unittest.assertEqual(response_data, expected, 'should return a filtered 5-bin histogram for foo')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return a filtered 5-bin histogram for foo'
+            )
 
     with app.test_client() as c:
         with ExitStack() as stack:
@@ -695,6 +729,27 @@ def test_get_histogram(unittest, test_data):
             response = c.get('/dtale/histogram/{}'.format(c.port), query_string=dict(col='foo'))
             response_data = json.loads(response.data)
             unittest.assertEqual(response_data['error'], 'histogram failure', 'should handle histogram exception')
+
+
+CORRELATIONS_CODE = '''# DISCLAIMER: 'df' refers to the data you passed in when calling 'dtale.show'
+
+import numpy as np
+import pandas as pd
+
+if isinstance(df, (pd.DatetimeIndex, pd.MultiIndex)):
+\tdf = df.to_frame(index=False)
+
+# remove any pre-existing indices for ease of use in the D-Tale code, but this is not required
+df = df.reset_index().drop('index', axis=1, errors='ignore')
+df.columns = [str(c) for c in df.columns]  # update columns to strings in case they are numbers
+
+corr_cols = [
+\t'security_id', 'foo', 'bar'
+]
+corr_data = np.corrcoef(df[corr_cols].values, rowvar=False)
+corr_data = pd.DataFrame(corr_data, columns=[corr_cols], index=[corr_cols])
+corr_data.index.name = str('column')
+corr_data = corr_data.reset_index()'''
 
 
 @pytest.mark.unit
@@ -717,7 +772,12 @@ def test_get_correlations(unittest, test_data, rolling_data):
                 dates=[],
                 rolling=False
             )
-            unittest.assertEqual(response_data, expected, 'should return correlations')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return correlations'
+            )
+            unittest.assertEqual(response_data['code'], CORRELATIONS_CODE)
 
     with app.test_client() as c:
         with ExitStack() as stack:
@@ -748,7 +808,11 @@ def test_get_correlations(unittest, test_data, rolling_data):
                 dates=['date'],
                 rolling=False
             )
-            unittest.assertEqual(response_data, expected, 'should return correlations')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return correlations'
+            )
 
     df, _ = views.format_data(rolling_data)
     with app.test_client() as c:
@@ -766,6 +830,24 @@ def build_ts_data(size=5, days=5):
     for d in pd.date_range(start, start + Day(days - 1)):
         for i in range(size):
             yield dict(date=d, security_id=i, foo=i, bar=i)
+
+
+CORRELATIONS_TS_CODE = '''# DISCLAIMER: 'df' refers to the data you passed in when calling 'dtale.show'
+
+import pandas as pd
+
+if isinstance(df, (pd.DatetimeIndex, pd.MultiIndex)):
+\tdf = df.to_frame(index=False)
+
+# remove any pre-existing indices for ease of use in the D-Tale code, but this is not required
+df = df.reset_index().drop('index', axis=1, errors='ignore')
+df.columns = [str(c) for c in df.columns]  # update columns to strings in case they are numbers
+
+corr_ts = df.groupby('date')['foo', 'bar'].corr(method='pearson')
+corr_ts.index.names = ['date', 'column']
+corr_ts = corr_ts[corr_ts.column == 'foo'][['date', 'bar']]
+
+corr_ts.columns = ['date', 'corr']'''
 
 
 @pytest.mark.unit
@@ -791,7 +873,12 @@ def test_get_correlations_ts(unittest, rolling_data):
                 'min': {'corr': 1.0, 'x': '2000-01-01'},
                 'success': True,
             }
-            unittest.assertEqual(response_data, expected, 'should return timeseries correlation')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return timeseries correlation'
+            )
+            unittest.assertEqual(response_data['code'], CORRELATIONS_TS_CODE)
 
     df, _ = views.format_data(rolling_data)
     with app.test_client() as c:
@@ -813,6 +900,28 @@ def test_get_correlations_ts(unittest, rolling_data):
             unittest.assertEqual(
                 response_data['error'], "name 'missing_col' is not defined", 'should handle correlations exception'
             )
+
+
+SCATTER_CODE = '''# DISCLAIMER: 'df' refers to the data you passed in when calling 'dtale.show'
+
+import pandas as pd
+
+if isinstance(df, (pd.DatetimeIndex, pd.MultiIndex)):
+\tdf = df.to_frame(index=False)
+
+# remove any pre-existing indices for ease of use in the D-Tale code, but this is not required
+df = df.reset_index().drop('index', axis=1, errors='ignore')
+df.columns = [str(c) for c in df.columns]  # update columns to strings in case they are numbers
+
+scatter_data = df[df['date'] == '20000101']
+scatter_data = scatter_data['foo', 'bar'].dropna(how='any')
+scatter_data['index'] = scatter_data.index
+s0 = scatter_data['foo']
+s1 = scatter_data['bar']
+pearson = s0.corr(s1, method='pearson')
+spearman = s0.corr(s1, method='spearman')
+only_in_s0 = len(scatter_data[scatter_data['foo'].isnull()])
+only_in_s1 = len(scatter_data[scatter_data['bar'].isnull()])'''
 
 
 @pytest.mark.unit
@@ -853,7 +962,12 @@ def test_get_scatter(unittest, rolling_data):
                 min={'bar': 0, 'index': 0, 'x': 0},
                 x='foo'
             )
-            unittest.assertEqual(response_data, expected, 'should return scatter')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return scatter'
+            )
+            unittest.assertEqual(response_data['code'], SCATTER_CODE)
 
     df, _ = views.format_data(rolling_data)
     with app.test_client() as c:
@@ -896,7 +1010,11 @@ def test_get_scatter(unittest, rolling_data):
                 },
                 error='Dataset exceeds 15,000 records, cannot render scatter. Please apply filter...'
             )
-            unittest.assertEqual(response_data, expected, 'should return scatter')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return scatter'
+            )
 
     with app.test_client() as c:
         with ExitStack() as stack:
@@ -934,7 +1052,11 @@ def test_get_chart_data(unittest, test_data, rolling_data):
                 u'min': {'security_id': 50, 'x': '2000-01-01'},
                 u'success': True,
             }
-            unittest.assertEqual(response_data, expected, 'should return chart data')
+            unittest.assertEqual(
+                {k: v for k, v in response_data.items() if k != 'code'},
+                expected,
+                'should return chart data'
+            )
 
     test_data.loc[:, 'baz'] = 'baz'
 

@@ -207,7 +207,7 @@ function urlFetcher(url) {
   } else if (_.startsWith(url, "/dtale/context-variables")) {
     return getDataId(url) === "error" ? { error: "Error loading context variables" } : CONTEXT_VARIABLES;
   } else if (_.startsWith(url, "/dtale/code-export")) {
-    return { code: "code test" };
+    return { code: "test code" };
   }
   return {};
 }

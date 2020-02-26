@@ -11,9 +11,9 @@ class ColumnBuilder(object):
         if column_type == 'numeric':
             self.builder = NumericColumnBuilder(name, cfg)
         elif column_type == 'datetime':
-            self.builder = NumericColumnBuilder(name, cfg)
+            self.builder = DatetimeColumnBuilder(name, cfg)
         elif column_type == 'bins':
-            self.builder = NumericColumnBuilder(name, cfg)
+            self.builder = BinsColumnBuilder(name, cfg)
         else:
             raise NotImplementedError('{} column builder not implemented yet!'.format(column_type))
 
