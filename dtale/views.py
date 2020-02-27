@@ -34,10 +34,6 @@ logger = getLogger(__name__)
 IDX_COL = str('dtale_index')
 
 
-def get_globals(key):
-    return globals().get(key)
-
-
 def head_data_id():
     data_keys = global_state.get_data().keys()
     if not len(data_keys):

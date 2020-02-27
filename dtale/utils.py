@@ -734,7 +734,7 @@ def divide_chunks(l, n):
         yield l[i:i + n]
 
 
-def run_query(df, query, context_vars):
+def run_query(df, query, context_vars=None):
     """
     Utility function for running :func:`pandas:pandas.DataFrame.query` . This function contains extra logic to
     handle when column names contain special characters.  Looks like pandas will be handling this in a future
@@ -767,12 +767,12 @@ def run_query(df, query, context_vars):
             replacements[cn] = r
 
         inv_replacements = {replacements[k]: k for k in replacements.keys()}
-        df = df.rename(columns=replacements)  # Rename the columns
+        df = df.rename(columns=replacements)
 
-        df = df.query(final_query, local_dict=context_vars)  # Carry out query
+        df = df.query(final_query, local_dict=context_vars or {})
         df = df.rename(columns=inv_replacements)
     else:
-        df = df.query(query, local_dict=context_vars)
+        df = df.query(query, local_dict=context_vars or {})
 
     if not len(df):
         raise Exception('query "{}" found no data, please alter'.format(query))
